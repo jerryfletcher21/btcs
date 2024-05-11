@@ -1,0 +1,134 @@
+#!/bin/sh
+
+info=$(cat << EOF
+btcs derive-addresses [options] core-wallet descriptor-number [range]
+
+-r, --received
+-b, --balance
+-d, --descriptor
+EOF
+)
+
+is_uint_greater_than_zero() {
+    case "$1" in
+        ''|*[!0-9]*|0)
+            return 1
+        ;;
+        *)
+            return 0
+        ;;
+    esac
+}
+
+if [ "$#" -lt 1 ]; then
+    echo "error: insert core-wallet" >&2
+    exit 1
+fi
+
+print_info=false
+print_descriptor=false
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            echo "$info"
+            exit 0
+        ;;
+        -r|--received)
+            print_info="received"
+        ;;
+        -b|--balance)
+            print_info="balance"
+        ;;
+        -d|--descriptor)
+            print_descriptor=true
+        ;;
+        -*)
+            echo "error: option $1 not recognized" >&2
+            exit 1
+        ;;
+        *)
+            break
+        ;;
+    esac
+    shift 1
+done
+wallet="$1"
+shift 1
+
+if ! $BTC_BIN listwallets | jq -r '.[]' | grep "^${wallet}$" >/dev/null; then
+    echo "error: wallet $wallet does not exists or is not loaded" >&2
+    exit 1
+fi
+
+if [ "$#" -lt 1 ]; then
+    echo "error: insert descriptor-number" >&2
+    exit 1
+fi
+descriptor_number="$1"
+shift 1
+if ! is_uint_greater_than_zero "$descriptor_number"; then
+    echo "error: descriptor-number $descriptor_number is not a number greater than 0" >&2
+    exit 1
+fi
+
+if [ "$#" -ge 1 ]; then
+    range="$1"
+    shift 1
+    if [ "$range" != "null" ] && ! is_uint_greater_than_zero "$range"; then
+        echo "error: range $range is not a number greater than 0 or null" >&2
+        exit 1
+    fi
+else
+    range="10"
+fi
+
+if [ "$range" != "null" ]; then
+    set -- range="$(( range - 1 ))"
+else
+    set --
+fi
+
+if ! descriptor="$(
+    $BTC_BIN -rpcwallet="$wallet" listdescriptors |
+    jq -e -r ".descriptors[$(( descriptor_number - 1 ))].desc"
+)"; then
+    echo "error: wrong descriptor-number" >&2
+    exit 1
+fi
+addresses="$(
+    $BTC_BIN -named deriveaddresses descriptor="$descriptor" "$@" |
+    jq -r '.[]'
+)"
+
+if [ "$print_descriptor" = true ]; then
+    printf "%s\n" "$descriptor"
+fi
+if [ "$print_info" = false ]; then
+    printf "%s\n" "$addresses"
+else
+    printf "%s\n" "$addresses" |
+    while read -r address; do
+        if [ "$print_info" = "received" ]; then
+            if received="$(
+                $BTC_BIN -rpcwallet="$wallet" -named getreceivedbyaddress \
+                    address="$address" minconf=0
+            )"; then
+                printf "%-62s %12s\n" "$address" "$received"
+            else
+                printf "%-62s\n" "$address"
+            fi
+        elif [ "$print_info" = "balance" ]; then
+            if balance="$(
+                "$BTCS_HOME/scripts/btcs-info-address" "$address" "$wallet" |
+                tail -n 1 |
+                rev |
+                cut -d " " -f 1 |
+                rev
+            )"; then
+                printf "%-62s %12s\n" "$address" "$balance"
+            else
+                printf "%-62s\n" "$address"
+            fi
+        fi
+    done
+fi

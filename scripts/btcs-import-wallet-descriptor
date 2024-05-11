@@ -1,0 +1,74 @@
+#!/bin/sh
+
+info=$(cat << EOF
+btcs import-wallet-descriptor name date key
+
+old script
+EOF
+)
+
+if [ "$#" -ge 1 ]; then
+    case "$1" in
+        -h|--help)
+            echo "$info"
+            exit 0
+        ;;
+    esac
+fi
+
+if [ "$#" -lt 3 ]; then
+    echo "error: insert name date key" >&2
+    exit 1
+fi
+name="$1"
+date="$2"
+key="$3"
+shift 3
+if [ "$#" -ge 1 ]; then
+    fingerprint_path="$1"
+    shift 1
+fi
+
+key_type="$(echo "$key" | cut -b -4)"
+case "$key_type" in
+    xpub|ypub|zpub|xprv|yprv|zprv) ;;
+    *)
+        echo "error: $key_type not valid" >&2
+        exit 1
+    ;;
+esac
+
+key_hex="$(printf "%s" "$key" | base58 -dc | xxd -p | tr -d "\n")"
+key_last="$(echo "$key_hex" | cut -b 9-)"
+
+xpub_start="0488b21e"
+
+xpub="$(printf "%s%s" "$xpub_start" "$key_last" | xxd -r -p | base58 -c)"
+
+desc_info="$($BTC_BIN getdescriptorinfo "wpkh(${fingerprint_path}${xpub}/0/*)")"
+desc_first="$(echo "$desc_info" | jq -r '.descriptor' | tr \' h | cut -d "#" -f 1)"
+desc_checksum="$(echo "$desc_info" | jq -r '.checksum')"
+desc="${desc_first}#${desc_checksum}"
+
+timestamp="$(date -d "$date" +%s)"
+timestamp_low="$(( (timestamp / 10000000) * 10000000 ))"
+
+import_json=$(cat << EOF
+[ { "desc": "${desc}", "active": true, "range": [0, 999], "timestamp": ${timestamp_low} } ]
+EOF
+)
+
+echo "$import_json" | jq -r '.'
+
+$BTC_BIN -named createwallet \
+    wallet_name="$name" \
+    disable_private_keys=true \
+    blank=true \
+    avoid_reuse=false \
+    descriptors=true \
+    load_on_startup=true \
+    external_signer=false
+
+echo "wallet $name created"
+
+$BTC_BIN -rpcwallet="$name" importdescriptors "$import_json"

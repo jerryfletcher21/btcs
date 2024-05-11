@@ -1,0 +1,162 @@
+#!/bin/sh
+
+# TODO: rewrite it in python
+
+info=$(cat << EOF
+btcs tx-fee [-r|--raw, -l|--line] transaction
+EOF
+)
+
+if [ "$#" -lt 1 ]; then
+    echo "error: insert arguments" >&2
+    exit 1
+fi
+is_raw=false
+single_line=false
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            echo "$info"
+            return 0
+        ;;
+        -r|--raw)
+            is_raw=true
+        ;;
+        -l|--line)
+            single_line=true
+        ;;
+        -*)
+            echo "error: $1 not recognized" >&2
+            exit 1
+        ;;
+        *)
+            break
+        ;;
+    esac
+    shift 1
+done
+
+if [ "$#" -lt 1 ]; then
+    echo "error: insert arguments" >&2
+    exit 1
+fi
+tx="$1"
+shift 1
+
+if [ "$is_raw" = true ]; then
+    if ! decoded_raw_tx="$($BTC_BIN decoderawtransaction "$tx")"; then
+        echo "error: decoding raw transaction" >&2
+        exit 1
+    fi
+    if ! txid_orig="$(printf "%s\n" "$decoded_raw_tx" | jq -e -r '.txid' 2>/dev/null)"; then
+        echo "error: getting txid" >&2
+        exit 1
+    fi
+else
+    txid_orig="$tx"
+fi
+
+if ! decoded_tx="$(
+    $BTC_BIN -named getrawtransaction txid="$txid_orig" verbosity=1
+)"; then
+    echo "error: decoding the transaction" >&2
+    exit 1
+fi
+
+if ! confirmations="$(printf "%s\n" "$decoded_tx" | jq -e -r '.confirmations' 2>/dev/null)"; then
+    confirmations=0
+    height=0
+else
+    if
+        ! blockhash="$(printf "%s\n" "$decoded_tx" | jq -e -r '.blockhash' 2>/dev/null)" ||
+        ! height="$($BTC_BIN getblockheader "$blockhash" | jq -e -r '.height' 2>/dev/null)"; then
+        height=0
+    fi
+fi
+if ! date_unix="$(printf "%s\n" "$decoded_tx" | jq -e -r '.blocktime' 2>/dev/null)"; then
+    date_tx="not confirmed"
+else
+    date_tx="$(date -d @"$date_unix" +"%Y/%m/%d %H:%M:%S")"
+fi
+
+scale=8
+
+all_confirmed_and_vin_total="$(
+    printf "%s\n" "$decoded_tx" |
+    jq -r '.vin[] | "\(.txid) \(.vout)"' | {
+        all_confirmed=true
+        while read -r line; do
+            txid="$(echo "$line" | cut -d " " -f 1)"
+            vout="$(echo "$line" | cut -d " " -f 2)"
+
+            value="$(
+                $BTC_BIN -named getrawtransaction txid="$txid" verbosity=2 |
+                jq -r ".vout[${vout}].value"
+            )"
+            printf "%.${scale}f\n" "$value"
+
+            if ! $BTC_BIN -named getrawtransaction txid="$txid" verbosity=2 | jq -r -e '.confirmations' >/dev/null 2>&1; then
+                all_confirmed=false
+            fi
+        done
+        echo "$all_confirmed"
+    } | tac | {
+        read -r all_confirmed
+        echo "$all_confirmed"
+        sum=0
+        while read -r line; do
+            sum="$(echo "scale=${scale}; $sum + $line" | bc)"
+        done
+        echo "$sum"
+    }
+)"
+all_confirmed="$(echo "$all_confirmed_and_vin_total" | head -n 1)"
+vin_total="$(echo "$all_confirmed_and_vin_total" | tail -n 1)"
+
+vout_total="$(
+    printf "%s\n" "$decoded_tx" |
+    jq -r '.vout[].value' | {
+        sum=0
+        while read -r line; do
+            value="$(printf "%.${scale}f\n" "$line")"
+            sum="$(echo "scale=${scale}; $sum + $value" | bc)"
+        done
+        echo "$sum"
+    }
+)"
+
+vsize="$(printf "%s\n" "$decoded_tx" | jq -r '.vsize')"
+
+fee="$(
+    echo "scale=0; (($vin_total - $vout_total) * 100000000) / 1" |
+    bc
+)"
+fee_rate="$(
+    echo "scale=2; $fee / $vsize" |
+    bc
+)"
+
+if [ "$all_confirmed" = false ]; then
+    other="CPFP"
+else
+    other="----"
+fi
+
+if [ "$single_line" = false ]; then
+    printf "%s\n" "$date_tx"
+    if [ "$height" != "0" ]; then
+        printf "%s\n" "$height"
+    fi
+    if [ "$confirmations" != "0" ]; then
+        printf "%s\n" "$confirmations"
+    fi
+    printf "%s\n" "$fee"
+    printf "%s\n" "$fee_rate"
+
+    if [ "$all_confirmed" = false ]; then
+        printf "%s\n" "$other"
+    fi
+else
+    printf "%-19s %6s %6s %7s %7s %4s\n" \
+        "$date_tx" "$height" "$confirmations" "$fee" "$fee_rate" "$other"
+fi

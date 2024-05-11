@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+
+# source this file in ~/.bashrc
+# if the bash completion package is installed there are better completions
+# complete -F __btcs_completion <script-name>
+
+__btcs_completion() {
+    local ifs_original="$IFS"
+    local ifs_newline='
+'
+
+    # shellcheck disable=SC2034
+    local cur prev words=() cword
+
+    # if bash completion is sourced
+    # if [ "$(type -t _get_comp_words_by_ref 2>/dev/null)" = "function" ]; then
+    #     _get_comp_words_by_ref -n = cur prev words cword
+    #
+    #     advanced_completion=true
+    # else
+        cur="$2"
+        # prev="$3"
+        # words=("${COMP_WORDS[@]}")
+        cword="$COMP_CWORD"
+
+    #     advanced_completion=false
+    # fi
+
+    OPTS=""
+
+    btcs="${XDG_DATA_HOME:-${XDG_LOCAL_HOME:-$HOME/.local}/share}/btcs/btcs"
+    if [ ! -f "$btcs" ]; then
+        return 0
+    fi
+
+    if [ "${cword}" -eq 1 ]; then
+        OPTS="-h
+--help
+$($btcs list-actions)"
+    # else
+    #     local action="${words[1]}"
+    fi
+
+    if [ -n "$OPTS" ]; then
+        # complete with ignorecase and multi words
+        IFS="$ifs_newline"
+        # shellcheck disable=SC2207
+        COMPREPLY=($(
+            printf "%s\n" "$OPTS" |
+            awk -v IGNORECASE=1 -v p="$cur" 'p==substr($0,0,length(p))'
+        ))
+        IFS="$ifs_original"
+
+        # do not put a space when the completion ends with an equal
+        for word in "${COMPREPLY[@]}"; do
+            case "$word" in
+            *=)
+                compopt -o nospace
+            ;;
+            esac
+        done
+    fi
+}

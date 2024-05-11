@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+
+"""btcs info-tx"""
+
+# pylint: disable=C0103 invalid-name
+# pylint: disable=C0209 consider-using-f-string
+# pylint: disable=W0511 fixme
+
+# TODO: do not use btc-tx-fee and rewrite it in python
+#       maybe merge this script with btc-info-address
+#       since they use the same code
+
+import os
+import sys
+import re
+import subprocess
+import json
+import datetime
+
+
+info = """\
+btc-info-tx [--no-fee] txid
+"""
+
+date_format = "%Y/%m/%d %H:%M"
+
+btc_bin_env = os.getenv("BTC_BIN")
+if btc_bin_env is None:
+    print("error: BTC_BIN not set", file=sys.stderr)
+    sys.exit(1)
+btc_bin = btc_bin_env.split()
+
+
+def subprocess_run_command(program, print_error=True):
+    """run subprocess"""
+
+    try:
+        process = subprocess.run(program, capture_output=True, check=False)
+    except FileNotFoundError:
+        print("error: command %s does not exists" % program[0], file=sys.stderr)
+        return False
+    if process.returncode != 0:
+        if print_error:
+            print(process.stderr.decode(), file=sys.stderr)
+        return False
+
+    return process.stdout
+
+
+def transaction_from_txid(txid):
+    """get raw transaction from txid"""
+
+    btc_getrawtransaction_command = btc_bin + [
+        "-named", "getrawtransaction", "txid=" + txid, "verbosity=1"
+    ]
+    output = subprocess_run_command(btc_getrawtransaction_command)
+    if output is False:
+        print("error: getting transaction %s" % txid, file=sys.stderr)
+        return False
+
+    return json.loads(output)
+
+
+def transaction_get_outputs(transaction):
+    """get outputs of a transaction"""
+
+    outputs = []
+    for out in transaction["vout"]:
+        try:
+            address = out["scriptPubKey"]["address"]
+        except KeyError:
+            address = ""
+
+        value = out["value"]
+        outputs.append({"address": address, "value": value})
+        # outputs.append((address, value))
+
+    return outputs
+
+
+def transaction_get_inputs(transaction):
+    """get inputs of a transaction"""
+
+    inputs = []
+    for inp in transaction["vin"]:
+        txid = inp["txid"]
+        vout = inp["vout"]
+
+        tx_input = transaction_from_txid(txid)
+        if tx_input is False:
+            return False
+
+        try:
+            inputs.append(transaction_get_outputs(tx_input)[vout])
+        except IndexError:
+            print("error: %s %s" % (txid, vout), file=sys.stderr)
+            continue
+
+    return inputs
+
+
+def tx_info(txid, print_fee=True):
+    """print transaction info"""
+
+    transaction = transaction_from_txid(txid)
+    if transaction is False:
+        print("error: getting txid", file=sys.stderr)
+        return False
+
+    inputs = transaction_get_inputs(transaction)
+    if inputs is False:
+        return False
+    outputs = transaction_get_outputs(transaction)
+    if inputs is False:
+        return False
+
+    total_input = 0
+    total_output = 0
+
+    number = 0
+    for inp in inputs:
+        total_input += inp["value"]
+        print("%-62s %3s %s" % (inp["address"], number, format(inp["value"], ".8f")))
+        number += 1
+
+    print("\n", end="")
+
+    number = 0
+    for out in outputs:
+        total_output += out["value"]
+        print("%-62s %3s %s" % (out["address"], number, format(out["value"], ".8f")))
+        number += 1
+
+    print("\n", end="")
+
+    vsize = transaction["vsize"]
+
+    locktime = transaction["locktime"]
+    if "confirmations" in transaction:
+        confirmations = transaction["confirmations"]
+        blocktime = transaction["blocktime"]
+
+        time = datetime.datetime.fromtimestamp(blocktime).strftime(date_format)
+
+        blockhash = transaction["blockhash"]
+        btc_getblockheader_command = btc_bin + ["getblockheader", blockhash]
+        output = subprocess_run_command(btc_getblockheader_command)
+        if output is False:
+            blockheight = 0
+        else:
+            blockheight = json.loads(output)["height"]
+    else:
+        confirmations = 0
+        time = "not confirmed"
+        blockheight = 0
+
+    print("%-16s %12s %12s %7s %7s %7s %s" % (
+        time,
+        vsize,
+        format(total_input - total_output, ".8f"),
+        locktime, confirmations, blockheight,
+        txid
+    ))
+
+    if print_fee:
+        btc_fee_info_command = [
+            "btc-tx-fee", txid
+        ]
+        output = subprocess_run_command(btc_fee_info_command)
+        if output is not False:
+            print("\n", end="")
+            print(output.decode(), end="")
+
+    return True
+
+
+argv = sys.argv[1:]
+
+print_fee_global = True
+
+while len(argv) > 0:
+    if argv[0] in ("-h", "--help"):
+        print(info, end="")
+        sys.exit(0)
+    elif argv[0] == "--no-fee":
+        print_fee_global = False
+    elif re.match('^-', argv[0]) is not None:
+        print("error: insert argument %s not recognized" % argv[0], file=sys.stderr)
+        sys.exit(1)
+    else:
+        break
+
+    argv = argv[1:]
+
+if len(argv) < 1:
+    print("error: insert txid", file=sys.stderr)
+    sys.exit(1)
+
+txid_global = argv[0]
+argv = argv[1:]
+
+try:
+    tx_info(txid_global, print_fee_global)
+except KeyboardInterrupt:
+    print("\n", end="")
+    sys.exit(1)

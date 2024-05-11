@@ -1,0 +1,40 @@
+#!/bin/sh
+
+info=$(cat << EOF
+btcs list-unspent wallet
+EOF
+)
+
+if [ "$#" -lt 1 ]; then
+    echo "error: insert wallet" >&2
+    exit 1
+fi
+case "$1" in
+    -h|--help)
+        echo "$info"
+        exit 0
+    ;;
+    -*)
+        echo "error: $1 not recognized" >&2
+        exit 1
+    ;;
+esac
+wallet="$1"
+shift 1
+if ! $BTC_BIN -rpcwallet="$wallet" getwalletinfo >/dev/null; then
+    exit 1
+fi
+
+$BTC_BIN -rpcwallet="$wallet" listunspent |
+jq -r '.[] | "\(.txid)\n\(.vout)\n\(.address)\n\(.amount)\n\(.confirmations)"' |
+while true; do
+    read -r txid || exit 1
+    read -r vout || exit 1
+    read -r address || exit 1
+    read -r amount || exit 1
+    read -r confirmations || exit 1
+
+    printf "%-64s %4s %12s %-62s %7s\n" \
+        "$txid" "$vout" "$amount" "$address" "$confirmations"
+done |
+sort -n -r -k 5

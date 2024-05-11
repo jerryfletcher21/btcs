@@ -1,0 +1,157 @@
+#!/bin/sh
+
+info=$(cat << EOF
+btcs import-wallet-descriptor-multi name date signers xpub...
+EOF
+)
+
+if [ "$#" -eq 0 ]; then
+    echo "error: insert parameters" >&2
+    exit 1
+fi
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            echo "$info"
+            exit 0
+        ;;
+        -*)
+            echo "error: option $1 not recognized" >&2
+            exit 1
+        ;;
+        *)
+            break
+        ;;
+    esac
+    shift 1
+done
+
+key_check_validity() {
+    _key="$1"
+    case "$_key" in
+        xpub*|xprv*)
+            return 0
+        ;;
+        tpub*|tprv*)
+            return 0
+        ;;
+        *)
+            echo "error: $_key not valid" >&2
+            return 1
+        ;;
+    esac
+}
+
+is_uint() {
+    case "$1" in
+        ''|*[!0-9]*)
+            return 1
+        ;;
+        *)
+            return 0
+        ;;
+    esac
+}
+
+descriptor_add_checksum() {
+    descriptor="$1"
+    shift 1
+
+    checksum="$($BTC_BIN getdescriptorinfo "$descriptor" | jq -r '.checksum')"
+
+    printf "%s#%s\n" "$descriptor" "$checksum"
+}
+
+if [ "$#" -lt 3 ]; then
+    echo "error: insert name date signers" >&2
+    exit 1
+fi
+name="$1"
+date="$2"
+signers="$3"
+shift 3
+
+if ! is_uint "$signers"; then
+    echo "error $signers is not an uint" >&2
+    exit 1
+fi
+
+timestamp_now=$(cat << EOF
+"now"
+EOF
+)
+case "$date" in
+    '')
+        echo "error: date is empty" >&2
+        exit 1
+    ;;
+    now)
+        timestamp_low="$timestamp_now"
+    ;;
+    *[!0-9]*)
+        timestamp="$(date -d "$date" +%s)"
+        timestamp_low="$(( (timestamp / 1000000) * 1000000 ))"
+    ;;
+    *)
+        timestamp_low="$timestamp_now"
+    ;;
+esac
+
+desc_external="wsh(sortedmulti(2"
+desc_internal="wsh(sortedmulti(2"
+
+while [ "$#" -gt 0 ]; do
+    xpub="$1"
+    shift 1
+    if ! key_check_validity "$xpub"; then
+        echo "error: $xpub is not valid" >&2
+        exit 1
+    fi
+
+    desc_external="${desc_external},${xpub}/0/*"
+    desc_internal="${desc_internal},${xpub}/1/*"
+done
+
+desc_external="${desc_external}))"
+desc_internal="${desc_internal}))"
+
+desc_external="$(descriptor_add_checksum "$desc_external")"
+desc_internal="$(descriptor_add_checksum "$desc_internal")"
+
+import_json="[ "
+
+import_json=$(cat << EOF
+${import_json}
+    {
+        "desc": "${desc_external}",
+        "active": true,
+        "range": [0, 999],
+        "timestamp": ${timestamp_low},
+        "internal": false
+    },
+    {
+        "desc": "${desc_internal}",
+        "active": true,
+        "range": [0, 999],
+        "timestamp": ${timestamp_low},
+        "internal": true
+    }
+EOF
+)
+
+import_json="${import_json} ]"
+
+echo "$import_json" | jq -r '.'
+
+$BTC_BIN -named createwallet \
+    wallet_name="$name" \
+    disable_private_keys=false \
+    blank=true \
+    avoid_reuse=false \
+    descriptors=true \
+    load_on_startup=true \
+    external_signer=false
+
+echo "wallet $name created"
+
+$BTC_BIN -rpcwallet="$name" importdescriptors "$import_json"

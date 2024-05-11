@@ -1,0 +1,74 @@
+#!/bin/sh
+
+project_home="$(dirname "$0")"
+export BTCS_HOME="$project_home"
+scripts_home="$project_home/scripts"
+
+actions="$(
+    find "$scripts_home" -type f |
+    rev |
+    cut -d "/" -f 1 |
+    rev |
+    cut -d "-" -f 2- |
+    sort
+)"
+
+info=$(cat << EOF
+btcs action
+
+BTC_BIN environment variable should be set
+BTCS_PRIVATE environment variable can be set
+
+actions:
+
+$actions
+EOF
+)
+
+if [ "$#" -lt 1 ]; then
+    echo "error: insert action" >&2
+    exit 1
+fi
+action="$1"
+shift 1
+
+case "$action" in
+    -h|--help)
+        echo "$info"
+        exit 0
+    ;;
+    -*)
+        echo "error: options $action not recognized" >&2
+        exit 1
+    ;;
+    list-actions)
+        printf "%s\n" "$actions"
+    ;;
+    *)
+        if [ -z "$BTC_BIN" ]; then
+            echo "error: set BTC_BIN" >&2
+            exit 1
+        fi
+        # shellcheck disable=SC2086
+        if ! command -v $BTC_BIN >/dev/null 2>&1; then
+            echo "error: $BTC_BIN is not a command" >&2
+            exit 1
+        fi
+
+        if [ -z "$BTCS_PRIVATE" ]; then
+            export BTCS_PRIVATE=false
+        fi
+
+        if [ -z "$COLUMNS" ]; then
+            column="$(stty size | cut -d " " -f 2)"
+            export COLUMNS="$column"
+        fi
+
+        btcs_script="$scripts_home/btcs-${action}"
+        if [ ! -x "$btcs_script" ]; then
+            echo "error: action $action not recognized" >&2
+            exit 1
+        fi
+        $btcs_script "$@"
+    ;;
+esac

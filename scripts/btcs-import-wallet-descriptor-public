@@ -1,0 +1,195 @@
+#!/bin/sh
+
+info=$(cat << EOF
+btcs import-wallet-descriptor-public name date xpub [fingerprint_path] [[legacy-xpub] [legacy-fingerprint]]
+EOF
+)
+
+if [ "$#" -eq 0 ]; then
+    echo "error: insert parameters" >&2
+    exit 1
+fi
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            echo "$info"
+            exit 0
+        ;;
+        -*)
+            echo "error: option $1 not recognized" >&2
+            exit 1
+        ;;
+        *)
+            break
+        ;;
+    esac
+    shift 1
+done
+
+key_check_validity() {
+    _key="$1"
+    case "$_key" in
+        xpub*|ypub*|zpub*|xprv*|yprv*|zprv*)
+            return 0
+        ;;
+        tpub*|tprv*)
+            return 0
+        ;;
+        *)
+            echo "error: $_key not valid" >&2
+            return 1
+        ;;
+    esac
+}
+
+wpkh_from_xprv() {
+    wpkh="wpkh($1)"
+
+    checksum="$($BTC_BIN getdescriptorinfo "$wpkh" | jq -r '.checksum')"
+
+    printf "%s#%s\n" "$wpkh" "$checksum"
+}
+
+pkh_from_xprv() {
+    pkh="pkh($1)"
+
+    checksum="$($BTC_BIN getdescriptorinfo "$pkh" | jq -r '.checksum')"
+
+    printf "%s#%s\n" "$pkh" "$checksum"
+}
+
+xpub_from_key() {
+    _key="$1"
+
+    key_hex="$(printf "%s" "$_key" | base58 -dc | xxd -p | tr -d "\n")"
+    key_last="$(echo "$key_hex" | cut -b 9-)"
+
+    xpub_start="0488b21e"
+
+    xpub="$(printf "%s%s" "$xpub_start" "$key_last" | xxd -r -p | base58 -c)"
+
+    printf "%s\n" "$xpub"
+}
+
+if [ "$#" -lt 3 ]; then
+    echo "error: insert name date key" >&2
+    exit 1
+fi
+name="$1"
+date="$2"
+key="$3"
+shift 3
+if ! key_check_validity "$key"; then
+    exit 1
+fi
+if [ "$#" -ge 1 ]; then
+    fingerprint_path="$1"
+    shift 1
+fi
+if [ "$#" -ge 1 ]; then
+    key_legacy="$1"
+    shift 1
+    if ! key_check_validity "$key_legacy"; then
+        exit 1
+    fi
+    if [ "$#" -ge 1 ]; then
+        fingerprint_path_legacy="$1"
+        shift 1
+    fi
+fi
+
+timestamp_now=$(cat << EOF
+"now"
+EOF
+)
+case "$date" in
+    '')
+        echo "error: date is empty" >&2
+        exit 1
+    ;;
+    now)
+        timestamp_low="$timestamp_now"
+    ;;
+    *[!0-9]*)
+        timestamp="$(date -d "$date" +%s)"
+        timestamp_low="$(( (timestamp / 1000000) * 1000000 ))"
+    ;;
+    *)
+        timestamp_low="$timestamp_now"
+    ;;
+esac
+
+case "$key" in
+    tpub*|tprv*)
+        xpub="$key"
+    ;;
+    *)
+        xpub="$(xpub_from_key "$key")"
+    ;;
+esac
+
+desc_external="$(wpkh_from_xprv "${fingerprint_path}${xpub}/0/*")"
+desc_internal="$(wpkh_from_xprv "${fingerprint_path}${xpub}/1/*")"
+
+import_json="[ "
+
+import_json=$(cat << EOF
+${import_json}
+    {
+        "desc": "${desc_external}",
+        "active": true,
+        "range": [0, 999],
+        "timestamp": ${timestamp_low},
+        "internal": false
+    },
+    {
+        "desc": "${desc_internal}",
+        "active": true,
+        "range": [0, 999],
+        "timestamp": ${timestamp_low},
+        "internal": true
+    }
+EOF
+)
+if [ -n "$key_legacy" ]; then
+    xpub_legacy="$(xpub_from_key "$key_legacy")"
+
+    desc_external_legacy="$(pkh_from_xprv "${fingerprint_path_legacy}${xpub_legacy}/0/*")"
+    desc_internal_legacy="$(pkh_from_xprv "${fingerprint_path_legacy}${xpub_legacy}/1/*")"
+
+    import_json=$(cat << EOF
+${import_json},
+    {
+        "desc": "${desc_external_legacy}",
+        "active": true,
+        "range": [0, 999],
+        "timestamp": ${timestamp_low},
+        "internal": false
+    },
+    {
+        "desc": "${desc_internal_legacy}",
+        "active": true,
+        "range": [0, 999],
+        "timestamp": ${timestamp_low},
+        "internal": true
+    }
+EOF
+    )
+fi
+
+import_json="${import_json} ]"
+
+echo "$import_json" | jq -r '.'
+
+$BTC_BIN -named createwallet \
+    wallet_name="$name" \
+    disable_private_keys=true \
+    blank=true \
+    avoid_reuse=false \
+    descriptors=true \
+    load_on_startup=true \
+    external_signer=false
+
+echo "wallet $name created"
+
+$BTC_BIN -rpcwallet="$name" importdescriptors "$import_json"

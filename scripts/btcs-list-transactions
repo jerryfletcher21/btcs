@@ -1,0 +1,125 @@
+#!/bin/sh
+
+info=$(cat << EOF
+btcs list-transactions [-i|--txid, -u|--unconfirmed] wallet [count] [skip]
+EOF
+)
+
+is_uint() {
+    case "$1" in
+        ''|*[!0-9]*)
+            return 1
+        ;;
+        *)
+            return 0
+        ;;
+    esac
+}
+
+if [ "$#" -lt 1 ]; then
+    echo "error: insert parameters" >&2
+    exit 1
+fi
+txid_print=false
+just_unconfirmed=false
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            echo "$info"
+            exit 0
+        ;;
+        -i|--txid)
+            txid_print=true
+        ;;
+        -u|--unconfirmed)
+            just_unconfirmed=true
+        ;;
+        -*)
+            echo "error: $1 not recognized" >&2
+            exit 1
+        ;;
+        *)
+            break
+        ;;
+    esac
+    shift 1
+done
+if [ "$#" -lt 1 ]; then
+    echo "error: insert wallet" >&2
+    exit 1
+fi
+wallet="$1"
+shift 1
+if ! $BTC_BIN -rpcwallet="$wallet" getwalletinfo >/dev/null; then
+    exit 1
+fi
+
+max_count="65536"
+
+if [ "$#" -ge 1 ]; then
+    count="$1"
+    shift 1
+else
+    count="32"
+fi
+if [ "$count" = "all" ]; then
+    count="$max_count"
+elif ! is_uint "$count"; then
+    echo "error: count $count is not a number" >&2
+    exit 1
+fi
+
+if [ "$#" -ge 1 ]; then
+    skip="$1"
+    shift 1
+else
+    skip="0"
+fi
+if ! is_uint "$skip"; then
+    echo "error: skip $skip is not a number" >&2
+    exit 1
+fi
+
+if [ "$just_unconfirmed" = true ]; then
+    count="$max_count"
+fi
+
+# fee only available for the 'send' category of transactions
+
+$BTC_BIN -rpcwallet="$wallet" -named listtransactions count="$count" skip="$skip" include_watchonly=true |
+jq -r '.[] | "\(.address) \(.category) \(.amount) \(.fee) \(.confirmations) \(.blockheight) \(.txid)"' |
+while read -r line; do
+    confirmations="$(echo "$line" | cut -d " " -f 5)"
+    if [ "$just_unconfirmed" = true ] && [ "$confirmations" != "0" ]; then
+        continue
+    fi
+
+    address="$(echo "$line" | cut -d " " -f 1)"
+    category="$(echo "$line" | cut -d " " -f 2)"
+    amount="$(echo "$line" | cut -d " " -f 3)"
+    fee="$(echo "$line" | cut -d " " -f 4)"
+    blockheight="$(echo "$line" | cut -d " " -f 6)"
+    txid="$(echo "$line" | cut -d " " -f 7)"
+
+    printf "%-4s %-62s %12s" \
+        "$(printf "%s\n" "$category" | cut -b -4)" "$address" "$amount"
+
+    if [ "$txid_print" = true ]; then
+        if [ "$category" = "receive" ]; then
+            fee="$($BTC_BIN -named getrawtransaction txid="$txid" verbosity=2 | jq -r '.fee')"
+        fi
+
+        printf " %12s" "$fee"
+        if [ "$confirmations" -eq 0 ]; then
+            printf " %13s" "not confirmed"
+        else
+            printf " %6s %6s" "$confirmations" "$blockheight"
+        fi
+        printf " %64s" "$txid"
+    else
+        printf " %12s " "$fee"
+        "$BTCS_HOME/scripts/btcs-tx-fee" -l "$txid" 2>/dev/null | tr -d '\n'
+    fi
+
+    printf "\n"
+done

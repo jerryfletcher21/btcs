@@ -1,0 +1,58 @@
+#!/bin/sh
+
+info=$(cat << EOF
+btcs extended-key-path core-wallet private|public|descriptor
+EOF
+)
+
+if [ "$#" -ge 1 ]; then
+    case "$1" in
+        -h|--help)
+            echo "$info"
+            exit 0
+        ;;
+    esac
+fi
+
+if [ "$#" -lt 2 ]; then
+    echo "error: insert wallet and private/public/descriptor" >&2
+    exit 1
+fi
+wallet="$1"
+mode="$2"
+shift 2
+
+if ! $BTC_BIN listwallets | jq -r '.[]' | grep "^${wallet}$" >/dev/null; then
+    echo "error: wallet $wallet does not exists or is not loaded" >&2
+    exit 1
+fi
+
+case "$mode" in
+    private)
+        mode_bool=true
+    ;;
+    public)
+        mode_bool=false
+    ;;
+    descriptor)
+    ;;
+    *)
+        echo "error: mode not valid private/public/descriptor" >&2
+        exit 1
+    ;;
+esac
+
+case "$mode" in
+    private|public)
+        $BTC_BIN -rpcwallet="$wallet" listdescriptors "$mode_bool" |
+        jq -r '.descriptors[].desc' |
+        head -n 1 |
+        rev | cut -d "(" -f 1 | rev |
+        cut -d ")" -f 1
+    ;;
+    descriptor)
+        $BTC_BIN -rpcwallet="$wallet" listdescriptors |
+        jq -r '.descriptors[].desc' |
+        head -n 1
+    ;;
+esac

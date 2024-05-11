@@ -1,0 +1,63 @@
+#!/bin/sh
+
+info=$(cat << EOF
+btcs binary-to-words-old
+
+openbsd does not have shasum, prefer binary-to-words.py
+EOF
+)
+
+if [ "$#" -ge 1 ]; then
+    case "$1" in
+        -h|--help)
+            echo "$info"
+            exit 0
+        ;;
+    esac
+fi
+
+bin_from_hex() {
+    printf "obase=2; ibase=16; %s\n" "$1" | bc | awk '{ printf "%04d\n", $0 }'
+}
+
+get_word() {
+    number="$1"
+
+    wordfile="stf/wordlist"
+
+    head -n "$(( number + 1 ))" "$wordfile" | tail -n 1
+}
+
+if [ -t 0 ]; then
+    echo "error: no stdin" >&2
+    exit 1
+fi
+
+binary_no_checksum="$(cat)"
+
+shaoutput="$(printf "%s\n" "$binary_no_checksum" | shasum -a 256 -0)"
+
+first_hex="$(printf "%s\n" "$shaoutput" | cut -c 1 | tr '[:lower:]' '[:upper:]')"
+second_hex="$(printf "%s\n" "$shaoutput" | cut -c 2 | tr '[:lower:]' '[:upper:]')"
+
+first_bin="$(bin_from_hex "$first_hex")"
+second_bin="$(bin_from_hex "$second_hex")"
+
+# printf "%s\n%s\n" "$first_bin" "$second_bin"
+binary_all=$(cat << EOF
+${binary_no_checksum}${first_bin}${second_bin}
+EOF
+)
+
+bit_per_line=11
+
+printf "%s\n" "$binary_all" |
+while read -r binary; do
+    binary_number="$(printf "%s" "$binary" | wc -c)"
+    if [ "$binary_number" -ne "$bit_per_line" ]; then
+        echo "error: $binary is not $bit_per_line bit" >&2
+        exit 1
+    fi
+    number="$(echo "obase=10; ibase=2; $binary" | bc)"
+    get_word "$number"
+done

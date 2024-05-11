@@ -1,0 +1,57 @@
+#!/bin/sh
+
+info=$(cat << EOF
+btcs received-by-address [-l, --list] address
+EOF
+)
+
+if [ "$#" -eq 0 ]; then
+    echo "error: insert arguments" >&2
+    exit 1
+fi
+list_tx=false
+case "$1" in
+    -h|--help)
+        echo "$info"
+        exit 0
+    ;;
+    -l|--list)
+        list_tx=true
+        shift 1
+    ;;
+esac
+if [ "$#" -lt 1 ]; then
+    echo "error: insert address" >&2
+    exit 1
+fi
+address="$1"
+shift 1
+
+wallets="$($BTC_BIN listwallets | jq -r '.[]')"
+
+ifs_default="$IFS"
+ifs_newline='
+'
+
+IFS="$ifs_newline"
+for wallet in $wallets; do
+    IFS="$ifs_default"
+
+    if received="$(
+        $BTC_BIN -rpcwallet="$wallet" -named getreceivedbyaddress \
+            address="$address" \
+            minconf=0 \
+            2>/dev/null
+    )"; then
+        printf "%s %s\n" "$received" "$wallet"
+        if [ "$list_tx" = true ]; then
+            "$BTCS_HOME/scripts/btcs-info-address" "$address" "$wallet"
+        fi
+        exit 0
+    fi
+
+    IFS="$ifs_newline"
+done
+IFS="$ifs_default"
+
+echo "$address not found in any wallet"

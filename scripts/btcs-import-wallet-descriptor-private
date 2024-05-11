@@ -1,0 +1,156 @@
+#!/bin/sh
+
+info=$(cat << EOF
+btcs import-wallet-descriptor-private [--both, --single] name date xprv [derivation]
+
+default mode is both
+
+default derivation both:
+84h/0h/0h --> 84h/0h/0h/0/* 84h/0h/0h/1/*
+
+default derivation single:
+* --> *
+EOF
+)
+
+mode="both"
+
+if [ "$#" -eq 0 ]; then
+    echo "error: insert parameters" >&2
+    exit 1
+fi
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            echo "$info"
+            exit 0
+        ;;
+        --single|--both)
+            mode="$(echo "$1" | cut -d "-" -f 3)"
+        ;;
+        -*)
+            echo "error: option $1 not recognized" >&2
+            exit 1
+        ;;
+        *)
+            break
+        ;;
+    esac
+    shift 1
+done
+
+if [ "$#" -lt 3 ]; then
+    echo "error: insert name date key" >&2
+    exit 1
+fi
+name="$1"
+date="$2"
+xprv="$3"
+shift 3
+
+case "$xprv" in
+    xprv*) ;;
+    tprv*) ;;
+    *)
+        echo "error: $xprv not valid" >&2
+        exit 1
+    ;;
+esac
+
+if [ "$#" -gt 0 ]; then
+    derivation="$1"
+    shift 1
+else
+    case "$mode" in
+        both)
+            derivation="84h/0h/0h"
+        ;;
+        single)
+            derivation="*"
+        ;;
+    esac
+fi
+
+descriptor_from_xprv() {
+    wpkh="wpkh($1)"
+
+    checksum="$($BTC_BIN getdescriptorinfo "$wpkh" | jq -r '.checksum')"
+
+    printf "%s#%s\n" "$wpkh" "$checksum"
+}
+
+timestamp_now=$(cat << EOF
+"now"
+EOF
+)
+case "$date" in
+    '')
+        echo "error: date is empty" >&2
+        exit 1
+    ;;
+    now)
+        timestamp_low="$timestamp_now"
+    ;;
+    *[!0-9]*)
+        timestamp="$(date -d "$date" +%s)"
+        timestamp_low="$(( (timestamp / 1000000) * 1000000 ))"
+    ;;
+    *)
+        timestamp_low="$timestamp_now"
+    ;;
+esac
+
+if [ "$mode" = "both" ]; then
+    desc_external="$(descriptor_from_xprv "${xprv}/${derivation}/0/*")"
+    desc_internal="$(descriptor_from_xprv "${xprv}/${derivation}/1/*")"
+
+    import_json=$(cat << EOF
+[
+    {
+        "desc": "${desc_external}",
+        "active": true,
+        "range": [0, 999],
+        "timestamp": ${timestamp_low},
+        "internal": false
+    },
+    {
+        "desc": "${desc_internal}",
+        "active": true,
+        "range": [0, 999],
+        "timestamp": ${timestamp_low},
+        "internal": true
+    }
+]
+EOF
+    )
+elif [ "$mode" = "single" ]; then
+    desc_single="$(descriptor_from_xprv "${xprv}/${derivation}")"
+
+    import_json=$(cat << EOF
+[
+    {
+        "desc": "${desc_single}",
+        "active": true,
+        "range": [0, 999],
+        "timestamp": ${timestamp_low},
+        "internal": false
+    }
+]
+EOF
+    )
+fi
+
+echo "$import_json" | jq -r '.'
+
+$BTC_BIN -named createwallet \
+    wallet_name="$name" \
+    disable_private_keys=false \
+    blank=true \
+    avoid_reuse=false \
+    descriptors=true \
+    load_on_startup=true \
+    external_signer=false
+
+echo "wallet $name created"
+
+$BTC_BIN -rpcwallet="$name" importdescriptors "$import_json"

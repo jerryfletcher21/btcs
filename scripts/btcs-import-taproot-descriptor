@@ -1,0 +1,114 @@
+#!/bin/sh
+
+info=$(cat << EOF
+btcs import-taproot-descriptor option=value...
+
+name
+status
+descriptors
+range
+EOF
+)
+
+if [ "$#" -ge 1 ]; then
+    case "$1" in
+        -h|--help)
+            echo "$info"
+            exit 0
+        ;;
+    esac
+fi
+
+check_parameter() {
+    if [ -z "$1" ]; then
+        echo "error: insert $2" >&2
+        exit 1
+    fi
+}
+
+get_value_from_arg() {
+    printf "%s\n" "$1" | cut -d "=" -f 2-
+}
+
+for arg in "$@"; do
+    case "$arg" in
+        name=*)
+            name="$(get_value_from_arg "$arg")"
+        ;;
+        status=*)
+            status="$(get_value_from_arg "$arg")"
+        ;;
+        descriptor=*)
+            descriptor="$(get_value_from_arg "$arg")"
+        ;;
+        range=*)
+            range="$(get_value_from_arg "$arg")"
+        ;;
+    esac
+done
+
+check_parameter "$name" "name"
+check_parameter "$status" "status"
+check_parameter "$descriptor" "descriptor"
+
+if [ -z "$range" ]; then
+    range=true
+fi
+
+case "$status" in
+    public)
+        disable_private_keys=true
+    ;;
+    private)
+        disable_private_keys=false
+    ;;
+    *)
+        echo "error: $status not valid, choose between public and private" >&2
+        exit 1
+    ;;
+esac
+
+timestamp="$(date +%s)"
+# timestamp="$(date -d "$date" +%s)"
+
+if [ "$range" = true ]; then
+    import_json=$(cat << EOF
+[
+    {
+        "desc": "${descriptor}",
+        "active": true,
+        "range": [0, 999],
+        "timestamp": ${timestamp},
+        "internal": false
+    }
+]
+EOF
+    )
+else
+    import_json=$(cat << EOF
+[
+    {
+        "desc": "${descriptor}",
+        "active": false,
+        "timestamp": ${timestamp},
+        "internal": false
+    }
+]
+EOF
+    )
+fi
+
+echo "$import_json" | jq -r '.'
+
+$BTC_BIN -named createwallet \
+    wallet_name="$name" \
+    disable_private_keys="$disable_private_keys" \
+    blank=true \
+    avoid_reuse=false \
+    descriptors=true \
+    load_on_startup=true \
+    external_signer=false
+
+echo "wallet $name created"
+
+$BTC_BIN -rpcwallet="$name" importdescriptors "$import_json"

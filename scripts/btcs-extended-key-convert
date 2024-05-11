@@ -1,0 +1,98 @@
+#!/bin/sh
+
+info=$(cat << EOF
+btcs extended-key-convert type
+
+convert between xpub|ypub|zpub xprv|yprv|zprv
+provide key from stdin
+EOF
+)
+
+xpub_start="0488b21e"
+xprv_start="0488ade4"
+
+ypub_start="049d7cb2"
+yprv_start="049d7878"
+
+zpub_start="04b24746"
+zprv_start="04b2430c"
+
+convert_key() {
+    _key="$1"
+    _key_type="$2"
+
+    case "$_key" in
+        xpub*|ypub*|zpub*)
+            case "$_key_type" in
+                xpub)
+                    key_start="$xpub_start"
+                ;;
+                ypub)
+                    key_start="$ypub_start"
+                ;;
+                zpub)
+                    key_start="$zpub_start"
+                ;;
+                *)
+                    echo "error: can not convert $_key to $_key_type" >&2
+                    return 1
+                ;;
+            esac
+        ;;
+        xprv*|yprv*|zprv*)
+            case "$_key_type" in
+                xprv)
+                    key_start="$xprv_start"
+                ;;
+                yprv)
+                    key_start="$yprv_start"
+                ;;
+                zprv)
+                    key_start="$zprv_start"
+                ;;
+                *)
+                    echo "error: can not convert $_key to $_key_type" >&2
+                    return 1
+                ;;
+            esac
+        ;;
+        *)
+            echo "error: $_key is not an extended key" >&2
+            return 1
+        ;;
+    esac
+
+    key_hex="$(printf "%s" "$_key" | base58 -dc | xxd -p | tr -d "\n")"
+    key_last="$(printf "%s\n" "$key_hex" | cut -b 9-)"
+
+    key_out="$(printf "%s%s" "$key_start" "$key_last" | xxd -r -p | base58 -c)"
+
+    printf "%s\n" "$key_out"
+}
+
+if [ -t 0 ]; then
+    echo "error: no key from stdin" >&2
+    exit 1
+fi
+key="$(cat)"
+
+if [ "$#" -lt 1 ]; then
+    echo "error: insert arguments" >&2
+    echo "$info" >&2
+    exit 1
+fi
+key_type="$1"
+shift 1
+case "$key_type" in
+    -h|--help)
+        echo "$info"
+        exit 0
+    ;;
+    -*)
+        echo "error: parameter $key_type not recognized" >&2
+        exit 1
+    ;;
+    *)
+        convert_key "$key" "$key_type"
+    ;;
+esac

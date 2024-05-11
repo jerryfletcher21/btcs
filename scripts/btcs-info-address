@@ -1,0 +1,278 @@
+#!/usr/bin/env python3
+
+"""btcs info-address"""
+
+# pylint: disable=C0103 invalid-name
+# pylint: disable=C0209 consider-using-f-string
+
+import os
+import sys
+import re
+import subprocess
+import json
+import datetime
+
+
+info = """\
+btcs info-address address [wallet]
+"""
+
+date_format = "%Y/%m/%d %H:%M"
+
+btc_bin_env = os.getenv("BTC_BIN")
+if btc_bin_env is None:
+    print("error: BTC_BIN not set", file=sys.stderr)
+    sys.exit(1)
+btc_bin = btc_bin_env.split()
+
+
+def subprocess_run_command(program, print_error=True):
+    """run subprocess"""
+
+    try:
+        process = subprocess.run(program, capture_output=True, check=False)
+    except FileNotFoundError:
+        print("error: command %s does not exists" % program[0], file=sys.stderr)
+        return False
+    if process.returncode != 0:
+        if print_error:
+            print(process.stderr.decode(), file=sys.stderr)
+        return False
+
+    return process.stdout
+
+
+def address_is_in_wallet(wallet, address):
+    """check if address is in a specific core wallets"""
+
+    btc_receivedbyaddress_command = btc_bin + [
+        "-rpcwallet=" + wallet, "-named", "getreceivedbyaddress",
+        "address=" + address, "minconf=0"
+    ]
+    output = subprocess_run_command(btc_receivedbyaddress_command, print_error=False)
+    if output is not False:
+        return True
+
+    return False
+
+
+def wallet_validate(wallet, address):
+    """check if the address is in the wallet"""
+
+    btc_getwalletinfo_command = btc_bin + ["-rpcwallet=" + wallet, "getwalletinfo"]
+    output = subprocess_run_command(btc_getwalletinfo_command)
+    if output is False:
+        print("error: wallet %s does not exists or is not loaded" % wallet, file=sys.stderr)
+        return False
+
+    if not address_is_in_wallet(wallet, address):
+        print("error: %s is not in %s" % (address, wallet), file=sys.stderr)
+        return False
+
+    return True
+
+
+def wallet_get_from_address(address):
+    """search address in core wallets"""
+
+    btc_listwallets_command = btc_bin + ["listwallets"]
+    output = subprocess_run_command(btc_listwallets_command)
+    if output is False:
+        print("error: running btc listwallets", file=sys.stderr)
+        return False
+    wallets = json.loads(output)
+    for wallet in wallets:
+        if address_is_in_wallet(wallet, address):
+            return wallet
+
+    print("error: %s not found in any loaded wallets" % address, file=sys.stderr)
+
+    return False
+
+
+def transaction_from_txid(txid):
+    """get raw transaction from txid"""
+
+    btc_getrawtransaction_command = btc_bin + [
+        "-named", "getrawtransaction", "txid=" + txid, "verbosity=1"
+    ]
+    output = subprocess_run_command(btc_getrawtransaction_command)
+    if output is False:
+        print("error: getting transaction %s" % txid, file=sys.stderr)
+        return False
+
+    return json.loads(output)
+
+
+def transaction_get_outputs(transaction):
+    """get the outputs of a transaction"""
+
+    outputs = []
+    for out in transaction["vout"]:
+        try:
+            address = out["scriptPubKey"]["address"]
+        except KeyError:
+            address = ""
+
+        value = out["value"]
+        outputs.append({"address": address, "value": value})
+        # outputs.append((address, value))
+
+    return outputs
+
+
+def transaction_get_inputs(transaction):
+    """get the inputs of a transaction"""
+
+    inputs = []
+    for inp in transaction["vin"]:
+        txid = inp["txid"]
+        vout = inp["vout"]
+
+        tx_input = transaction_from_txid(txid)
+        if tx_input is False:
+            return False
+
+        try:
+            inputs.append(transaction_get_outputs(tx_input)[vout])
+        except IndexError:
+            print("error: %s %s" % (txid, vout), file=sys.stderr)
+            continue
+
+    return inputs
+
+
+def list_transactions_address(wallet, address):
+    """run core listtransactions"""
+
+    btc_listtransactions_command = btc_bin + [
+        "-rpcwallet=" + wallet, "-named", "listtransactions",
+        "count=65536", "skip=0", "include_watchonly=true"
+    ]
+    output = subprocess_run_command(btc_listtransactions_command)
+    if output is False:
+        print("error: running btc listtransactions", file=sys.stderr)
+        return False
+
+    print("wallet: %s" % wallet)
+
+    transactions = json.loads(output)
+    txids = []
+    for tx in transactions:
+        txid = tx["txid"]
+        if txid not in txids:
+            txids.append(txid)
+
+    total_amount_positive = 0
+    total_amount_negative = 0
+    for txid in txids:
+        transaction = transaction_from_txid(txid)
+        if transaction is False:
+            continue
+
+        inputs = transaction_get_inputs(transaction)
+        if inputs is False:
+            return False
+        outputs = transaction_get_outputs(transaction)
+        if outputs is False:
+            return False
+
+        found_input = False
+        total_input = 0
+        found_output = False
+        total_output = 0
+        amount = 0
+        for inp in inputs:
+            total_input += inp["value"]
+            if inp["address"] == address:
+                amount -= inp["value"]
+                total_amount_negative -= inp["value"]
+                found_input = True
+        for out in outputs:
+            total_output += out["value"]
+            if out["address"] == address:
+                amount += out["value"]
+                total_amount_positive += out["value"]
+                found_output = True
+        if found_input or found_output:
+            category = ""
+            if found_input and found_output:
+                category = "both"
+            elif found_input:
+                category = "send"
+            elif found_output:
+                category = "rece"
+
+            locktime = transaction["locktime"]
+            confirmations = transaction.get("confirmations", 0)
+            blocktime = transaction.get("blocktime", 0)
+
+            if blocktime != 0:
+                time = datetime.datetime.fromtimestamp(blocktime).strftime(date_format)
+
+                blockhash = transaction["blockhash"]
+                btc_getblockheader_command = btc_bin + ["getblockheader", blockhash]
+                output = subprocess_run_command(btc_getblockheader_command)
+                if output is False:
+                    blockheight = 0
+                else:
+                    blockheight = json.loads(output)["height"]
+            else:
+                time = 0
+                blockheight = 0
+
+            print("%-4s %12s %12s %7s %7s %7s %16s %s" % (
+                category,
+                format(amount, "+.8f"), format(total_input - total_output, ".8f"),
+                locktime, confirmations, blockheight, time,
+                txid
+            ))
+
+    if int(total_amount_negative) != 0:
+        negative_string = format(total_amount_negative, "+.8f")
+    else:
+        negative_string = format(total_amount_negative, ".8f")
+    print("total positive: %12s" % format(total_amount_positive, "+.8f"))
+    print("total negative: %12s" % negative_string)
+    print("total:          %12s" % format(total_amount_positive + total_amount_negative, ".8f"))
+
+    # print(json.dumps(data))
+
+    return True
+
+
+argv = sys.argv[1:]
+
+while len(argv) > 0:
+    if argv[0] in ("-h", "--help"):
+        print(info, end="")
+        sys.exit(0)
+    elif re.match('^-', argv[0]) is not None:
+        print("error: insert argument %s not recognized" % argv[0], file=sys.stderr)
+        sys.exit(1)
+    else:
+        break
+
+if len(argv) < 1:
+    print("error: insert address", file=sys.stderr)
+    sys.exit(1)
+
+address_global = argv[0]
+argv = argv[1:]
+
+if len(argv) >= 1:
+    wallet_global = argv[0]
+    argv = argv[1:]
+
+    if not wallet_validate(wallet_global, address_global):
+        sys.exit(1)
+else:
+    wallet_global = wallet_get_from_address(address_global)
+    if wallet_global is False:
+        sys.exit(1)
+
+try:
+    list_transactions_address(wallet_global, address_global)
+except KeyboardInterrupt:
+    print("\n", end="")
+    sys.exit(1)
