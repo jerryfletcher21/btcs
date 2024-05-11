@@ -2,6 +2,8 @@
 
 info=$(cat << EOF
 btcs list-unspent wallet
+
+print unspent utxo of a wallet
 EOF
 )
 

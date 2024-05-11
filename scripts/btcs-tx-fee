@@ -4,6 +4,8 @@
 
 info=$(cat << EOF
 btcs tx-fee [-r|--raw, -l|--line] transaction
+
+print info about the fee of a transaction
 EOF
 )
 

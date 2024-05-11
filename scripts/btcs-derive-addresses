@@ -3,6 +3,8 @@
 info=$(cat << EOF
 btcs derive-addresses [options] core-wallet descriptor-number [range]
 
+derive addresses from descriptor wallet
+
 -r, --received
 -b, --balance
 -d, --descriptor

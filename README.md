@@ -2,6 +2,24 @@
 
 Some bitcoin core scripts. All sh scripts are posix compliant.
 
+| Action | Description |
+| --- | --- |
+| `binary-to-words` | convert list of 0's and 1's to bip39 words calculating checksum |
+| `derive-addresses` | derive addresses from descriptor wallet |
+| `extended-key-convert` | convert between xpub, ypub, zpub and xprv, yprv, zprv |
+| `extended-key-path` | get extended key from descriptor wallet |
+| `import-taproot-descriptor` | import a taproot descriptor creating a new wallet |
+| `import-wallet-descriptor-multi` | import a multisig wallet creating a new wallet |
+| `import-wallet-descriptor-private` | import a wallet with private keys creating a new wallet |
+| `import-wallet-descriptor-public` | import a wallet without private keys creating a new wallet |
+| `info-address` | print info about an address (should be present in a wallet) |
+| `info-tx` | print info about a transaction |
+| `list-transactions` | print transactions of a wallet |
+| `list-unspent` | print unspent utxo of a wallet |
+| `received-by-address` | getreceivedbyaddress searching all wallets |
+| `sign-message` | use bitscriptc to sign a message with an address |
+| `tx-fee` | print info about the fee of a transaction |
+
 ## Installation and usage
 
 To use it without insallation:

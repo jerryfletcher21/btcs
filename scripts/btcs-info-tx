@@ -20,6 +20,8 @@ import datetime
 
 info = """\
 btc-info-tx [--no-fee] txid
+
+print info about a transaction
 """
 
 date_format = "%Y/%m/%d %H:%M"

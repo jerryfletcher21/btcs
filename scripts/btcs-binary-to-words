@@ -10,6 +10,7 @@ import hashlib
 info = """\
 btcs binary-to-words
 
+convert list of 0's and 1's to bip39 words calculating checksum
 put a string of 0 and 1 as input (extra characters like spaces, tabs,
 newlines are accepted)
 every 11 bit should represent a bip39 word,
