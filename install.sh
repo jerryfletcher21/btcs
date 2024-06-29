@@ -20,6 +20,24 @@ btcs_install_data() {
     if [ ! -d "$btcs_home" ]; then
         mkdir -p "$btcs_home"
     fi
+
+    if ! cp -f "$project_home/btcs" "$btcs_home"; then
+        echo "error: installing btcs script" >&2
+        return 1
+    fi
+
+    btcs_stf_home="$btcs_home/stf"
+    if [ -d "$btcs_stf_home" ]; then
+        rm -rf "$btcs_stf_home"
+    fi
+    if [ ! -d "$btcs_stf_home" ]; then
+        mkdir -p "$btcs_stf_home"
+    fi
+    if ! cp -f "$project_home/stf/wordlist" "$btcs_stf_home"; then
+        echo "error: installing wordlist" >&2
+        return 1
+    fi
+
     btcs_script_home="$btcs_home/scripts"
     if [ -d "$btcs_script_home" ]; then
         rm -rf "$btcs_script_home"
@@ -27,17 +45,13 @@ btcs_install_data() {
     if [ ! -d "$btcs_script_home" ]; then
         mkdir -p "$btcs_script_home"
     fi
-    if ! cp -f "$project_home/btcs" "$btcs_home"; then
-        echo "error: installing btcs script" >&2
-        exit 1
-    fi
     if
         ! find "$project_home/scripts" \
             -type f \
             -exec cp -f "{}" "$btcs_script_home" \; >/dev/null
     then
         echo "error: installing scripts" >&2
-        exit 1
+        return 1
     fi
 
     echo "btcs data successfully installed"
@@ -46,21 +60,21 @@ btcs_install_data() {
 btcs_install_script() {
     if [ -z "$BTC_BIN" ]; then
         echo "error: set BTC_BIN" >&2
-        exit 1
+        return 1
     fi
     # shellcheck disable=SC2086
     if ! command -v $BTC_BIN >/dev/null 2>&1; then
         echo "error: $BTC_BIN is not a command" >&2
-        exit 1
+        return 1
     fi
 
     if [ -z "$BTCS_NAME" ]; then
         echo "error: set BTCS_NAME" >&2
-        exit 1
+        return 1
     fi
     if printf "%s\n" "$BTCS_NAME" | grep "[[:space:]]" >/dev/null 2>&1; then
         echo "error: $BTCS_NAME should not contain spaces" >&2
-        exit 1
+        return 1
     fi
 
     if [ ! -d "$bin_home" ]; then
@@ -70,11 +84,11 @@ btcs_install_script() {
     btcs_install_file="$bin_home/$BTCS_NAME"
     if ! touch "$btcs_install_file"; then
         echo "error: creating $btcs_install_file" >&2
-        exit 1
+        return 1
     fi
     if ! chmod u+x "$btcs_install_file"; then
         echo "error: setting permission on $btcs_install_file" >&2
-        exit 1
+        return 1
     fi
     btcs_install_file_content=$(cat << EOF
 #!/bin/sh
@@ -94,7 +108,7 @@ btcs_uninstall_data() {
     if [ -e "$btcs_home" ]; then
         if ! rm -rf "$btcs_home"; then
             echo "error: removing $btcs_home" >&2
-            exit 1
+            return 1
         fi
         echo "btcs data successfully uninstalled"
     else
@@ -105,18 +119,18 @@ btcs_uninstall_data() {
 btcs_uninstall_script() {
     if [ -z "$BTCS_NAME" ]; then
         echo "error: set BTCS_NAME" >&2
-        exit 1
+        return 1
     fi
     if printf "%s\n" "$BTCS_NAME" | grep "[[:space:]]" >/dev/null 2>&1; then
         echo "error: $BTCS_NAME should not contain spaces" >&2
-        exit 1
+        return 1
     fi
 
     btcs_install_file="$bin_home/$BTCS_NAME"
     if [ -f "$btcs_install_file" ]; then
         if ! rm -f "$btcs_install_file"; then
             echo "error: removing $btcs_install_file" >&2
-            exit 1
+            return 1
         fi
         echo "$BTCS_NAME successfully uninstalled"
     else

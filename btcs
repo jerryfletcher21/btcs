@@ -59,10 +59,12 @@ case "$action" in
             export BTCS_PRIVATE=false
         fi
 
-        if [ -z "$COLUMNS" ]; then
-            column="$(stty size | cut -d " " -f 2)"
-            export COLUMNS="$column"
-        fi
+        # should use COLUMNS in scripts
+        # if [ -z "$COLUMNS" ]; then
+        #     # fix: stty: 'standard input': Inappropriate ioctl for device
+        #     column="$(stty size | cut -d " " -f 2)"
+        #     export COLUMNS="$column"
+        # fi
 
         btcs_script="$scripts_home/btcs-${action}"
         if [ ! -x "$btcs_script" ]; then
