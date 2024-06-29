@@ -34,7 +34,7 @@ for char in sys.stdin.read().rstrip():
         bits_no_checksum = bits_no_checksum + char
 
 if len(bits_no_checksum) != 256:
-    print("error: there are not 256 bits", file=sys.stderr)
+    print(f"error: there are {len(bits_no_checksum)} instead of 256 bits", file=sys.stderr)
     sys.exit(1)
 
 checksum = hashlib.sha256(int(bits_no_checksum, 2).to_bytes(32, byteorder="big")).hexdigest()
