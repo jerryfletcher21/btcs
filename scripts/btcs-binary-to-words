@@ -13,9 +13,11 @@ btcs binary-to-words
 convert list of 0's and 1's to bip39 words calculating checksum
 put a string of 0 and 1 as input (extra characters like spaces, tabs,
 newlines are accepted)
+supports 24 and 12 words
 every 11 bit should represent a bip39 word,
-except the last, where there should be just 3 bits and the program
-will calculate the 8 bit checksum
+except the last, where there should be just 3 bits in case of 24 words
+and it will calculate the 8 bit checksum, and 7 bits in case of 12 words
+and it will calculate the 4 bit checksum
 """
 
 argv = sys.argv[1:]
@@ -33,13 +35,20 @@ for char in sys.stdin.read().rstrip():
     if char in ("0", "1"):
         bits_no_checksum = bits_no_checksum + char
 
-if len(bits_no_checksum) != 256:
-    print(f"error: there are {len(bits_no_checksum)} instead of 256 bits", file=sys.stderr)
+if len(bits_no_checksum) != 256 and len(bits_no_checksum) != 128:
+    print(
+        f"error: there are {len(bits_no_checksum)} instead of 128/256 bits",
+        file=sys.stderr
+    )
     sys.exit(1)
 
-checksum = hashlib.sha256(int(bits_no_checksum, 2).to_bytes(32, byteorder="big")).hexdigest()
+checksum = hashlib.sha256(
+    int(bits_no_checksum, 2).to_bytes(int(len(bits_no_checksum) / 8), byteorder="big")
+).hexdigest()
 
-bits = bits_no_checksum + "".join(format(int(hex_digit, 16), "04b") for hex_digit in checksum[:2])
+bits = (bits_no_checksum + "".join(
+    format(int(hex_digit, 16), "04b") for hex_digit in checksum
+))[:int((len(bits_no_checksum) / 32) * 33)]
 
 script_dir = os.path.dirname(os.path.realpath(__file__))
 wordlist_dir = script_dir + "/../stf/wordlist"
@@ -51,6 +60,6 @@ except IOError:
     print("error: reading wordlist file", file=sys.stderr)
     sys.exit(1)
 
-for word_number in range(24):
+for word_number in range(int(((len(bits_no_checksum) / 32) * 33) / 11)):
     bits_word = bits[word_number * 11 : word_number * 11 + 11]
     print(words[int(bits_word, 2)])
