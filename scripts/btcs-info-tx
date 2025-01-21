@@ -6,7 +6,7 @@
 # pylint: disable=C0209 consider-using-f-string
 # pylint: disable=W0511 fixme
 
-# TODO: do not use btc-tx-fee and rewrite it in python
+# TODO: do not use btcs-tx-fee and rewrite it in python
 #       maybe merge this script with btc-info-address
 #       since they use the same code
 
@@ -19,7 +19,7 @@ import datetime
 
 
 info = """\
-btc-info-tx [--no-fee] txid
+btc-info-tx [--raw] [--no-fee] txid|txraw
 
 print info about a transaction
 """
@@ -32,6 +32,10 @@ if btc_bin_env is None:
     sys.exit(1)
 btc_bin = btc_bin_env.split()
 
+btcs_home = os.getenv("BTCS_HOME")
+if btcs_home is None:
+    print("error: BTCS_HOME not set", file=sys.stderr)
+    sys.exit(1)
 
 def subprocess_run_command(program, print_error=True):
     """run subprocess"""
@@ -57,7 +61,20 @@ def transaction_from_txid(txid):
     ]
     output = subprocess_run_command(btc_getrawtransaction_command)
     if output is False:
-        print("error: getting transaction %s" % txid, file=sys.stderr)
+        print("error: getting transaction from txid %s" % txid, file=sys.stderr)
+        return False
+
+    return json.loads(output)
+
+def transaction_from_raw(raw_tx):
+    """get raw transaction from rawtx"""
+
+    btc_decoderaw_command = btc_bin + [
+        "decoderawtransaction", raw_tx
+    ]
+    output = subprocess_run_command(btc_decoderaw_command)
+    if output is False:
+        print("error: getting transaction from rawtx %s" % raw_tx, file=sys.stderr)
         return False
 
     return json.loads(output)
@@ -101,13 +118,19 @@ def transaction_get_inputs(transaction):
     return inputs
 
 
-def tx_info(txid, print_fee=True):
+def tx_info(txid, raw_tx, print_fee):
     """print transaction info"""
 
-    transaction = transaction_from_txid(txid)
-    if transaction is False:
-        print("error: getting txid", file=sys.stderr)
-        return False
+    if not raw_tx:
+        transaction = transaction_from_txid(txid)
+        if transaction is False:
+            print("error: getting txid", file=sys.stderr)
+            return False
+    else:
+        transaction = transaction_from_raw(txid)
+        if transaction is False:
+            print("error: getting rawtx", file=sys.stderr)
+            return False
 
     inputs = transaction_get_inputs(transaction)
     if inputs is False:
@@ -165,9 +188,14 @@ def tx_info(txid, print_fee=True):
     ))
 
     if print_fee:
-        btc_fee_info_command = [
-            "btc-tx-fee", txid
-        ]
+        if not raw_tx:
+            btc_fee_info_command = [
+                str(btcs_home) + "/scripts/btcs-tx-fee", txid
+            ]
+        else:
+            btc_fee_info_command = [
+                str(btcs_home) + "/scripts/btcs-tx-fee", "-r", txid
+            ]
         output = subprocess_run_command(btc_fee_info_command)
         if output is not False:
             print("\n", end="")
@@ -178,12 +206,15 @@ def tx_info(txid, print_fee=True):
 
 argv = sys.argv[1:]
 
+raw_tx_global = False
 print_fee_global = True
 
 while len(argv) > 0:
     if argv[0] in ("-h", "--help"):
         print(info, end="")
         sys.exit(0)
+    elif argv[0] == "--raw":
+        raw_tx_global = True
     elif argv[0] == "--no-fee":
         print_fee_global = False
     elif re.match('^-', argv[0]) is not None:
@@ -202,7 +233,7 @@ txid_global = argv[0]
 argv = argv[1:]
 
 try:
-    tx_info(txid_global, print_fee_global)
+    tx_info(txid_global, raw_tx_global, print_fee_global)
 except KeyboardInterrupt:
     print("\n", end="")
     sys.exit(1)

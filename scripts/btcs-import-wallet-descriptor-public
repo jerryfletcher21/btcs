@@ -115,7 +115,7 @@ case "$date" in
         timestamp_low="$(( (timestamp / 1000000) * 1000000 ))"
     ;;
     *)
-        timestamp_low="$timestamp_now"
+        timestamp_low="$date"
     ;;
 esac
 

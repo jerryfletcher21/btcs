@@ -1,14 +1,14 @@
 #!/bin/sh
 
 info=$(cat << EOF
-btcs import-wallet-descriptor-private [--both, --single] name date xprv [derivation]
+btcs import-wallet-descriptor-private [--both, --single, --all] name date xprv [derivation]
 
 default mode is both
 
 default derivation both:
 84h/0h/0h --> 84h/0h/0h/0/* 84h/0h/0h/1/*
 
-default derivation single:
+default derivation single and all:
 * --> *
 EOF
 )
@@ -25,7 +25,7 @@ while [ "$#" -gt 0 ]; do
             echo "$info"
             exit 0
         ;;
-        --single|--both)
+        --single|--both|--all)
             mode="$(echo "$1" | cut -d "-" -f 3)"
         ;;
         -*)
@@ -65,18 +65,30 @@ else
         both)
             derivation="84h/0h/0h"
         ;;
-        single)
+        single|all)
             derivation="*"
         ;;
     esac
 fi
 
-descriptor_from_xprv() {
-    wpkh="wpkh($1)"
+descriptor_add_checksum() {
+    descriptor_no_checksum="$1"
 
-    checksum="$($BTC_BIN getdescriptorinfo "$wpkh" | jq -r '.checksum')"
+    checksum="$($BTC_BIN getdescriptorinfo "$descriptor_no_checksum" | jq -r '.checksum')"
 
-    printf "%s#%s\n" "$wpkh" "$checksum"
+    printf "%s#%s\n" "$descriptor_no_checksum" "$checksum"
+}
+
+descriptor_sh_wpkh_from_xprv() {
+    descriptor_add_checksum "sh(wpkh($1))"
+}
+
+descriptor_wpkh_from_xprv() {
+    descriptor_add_checksum "wpkh($1)"
+}
+
+descriptor_tr_from_xprv() {
+    descriptor_add_checksum "tr($1)"
 }
 
 timestamp_now=$(cat << EOF
@@ -96,13 +108,13 @@ case "$date" in
         timestamp_low="$(( (timestamp / 1000000) * 1000000 ))"
     ;;
     *)
-        timestamp_low="$timestamp_now"
+        timestamp_low="$date"
     ;;
 esac
 
 if [ "$mode" = "both" ]; then
-    desc_external="$(descriptor_from_xprv "${xprv}/${derivation}/0/*")"
-    desc_internal="$(descriptor_from_xprv "${xprv}/${derivation}/1/*")"
+    desc_external="$(descriptor_wpkh_from_xprv "${xprv}/${derivation}/0/*")"
+    desc_internal="$(descriptor_wpkh_from_xprv "${xprv}/${derivation}/1/*")"
 
     import_json=$(cat << EOF
 [
@@ -124,12 +136,43 @@ if [ "$mode" = "both" ]; then
 EOF
     )
 elif [ "$mode" = "single" ]; then
-    desc_single="$(descriptor_from_xprv "${xprv}/${derivation}")"
+    desc_single="$(descriptor_wpkh_from_xprv "${xprv}/${derivation}")"
 
     import_json=$(cat << EOF
 [
     {
         "desc": "${desc_single}",
+        "active": true,
+        "range": [0, 999],
+        "timestamp": ${timestamp_low},
+        "internal": false
+    }
+]
+EOF
+    )
+elif [ "$mode" = "all" ]; then
+    desc_sh_wpkh="$(descriptor_sh_wpkh_from_xprv "${xprv}/${derivation}")"
+    desc_wpkh="$(descriptor_wpkh_from_xprv "${xprv}/${derivation}")"
+    desc_tr="$(descriptor_tr_from_xprv "${xprv}/${derivation}")"
+
+    import_json=$(cat << EOF
+[
+    {
+        "desc": "${desc_sh_wpkh}",
+        "active": true,
+        "range": [0, 999],
+        "timestamp": ${timestamp_low},
+        "internal": false
+    },
+    {
+        "desc": "${desc_wpkh}",
+        "active": true,
+        "range": [0, 999],
+        "timestamp": ${timestamp_low},
+        "internal": false
+    },
+    {
+        "desc": "${desc_tr}",
         "active": true,
         "range": [0, 999],
         "timestamp": ${timestamp_low},
