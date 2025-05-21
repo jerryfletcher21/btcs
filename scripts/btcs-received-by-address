@@ -33,6 +33,8 @@ ifs_default="$IFS"
 ifs_newline='
 '
 
+"$BTCS_HOME/scripts/btcs-comment" ad "$address" print 2>/dev/null
+
 IFS="$ifs_newline"
 for wallet in $wallets; do
     IFS="$ifs_default"
@@ -45,6 +47,7 @@ for wallet in $wallets; do
     )"; then
         printf "%s %s\n" "$received" "$wallet"
         if [ "$list_tx" = true ]; then
+            printf "\n"
             "$BTCS_HOME/scripts/btcs-info-address" "$address" "$wallet"
         fi
         exit 0

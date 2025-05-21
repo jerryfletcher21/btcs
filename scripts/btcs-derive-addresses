@@ -8,6 +8,7 @@ derive addresses from descriptor wallet
 -r, --received
 -b, --balance
 -d, --descriptor
+-c, --comment
 EOF
 )
 
@@ -29,6 +30,7 @@ fi
 
 print_info=false
 print_descriptor=false
+print_comment=false
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -h|--help)
@@ -43,6 +45,9 @@ while [ "$#" -gt 0 ]; do
         ;;
         -d|--descriptor)
             print_descriptor=true
+        ;;
+        -c|--comment)
+            print_comment=true
         ;;
         -*)
             echo "error: option $1 not recognized" >&2
@@ -110,14 +115,13 @@ if [ "$print_info" = false ]; then
 else
     printf "%s\n" "$addresses" |
     while read -r address; do
+        printf "%-62s" "$address"
         if [ "$print_info" = "received" ]; then
             if received="$(
                 $BTC_BIN -rpcwallet="$wallet" -named getreceivedbyaddress \
                     address="$address" minconf=0
             )"; then
-                printf "%-62s %12s\n" "$address" "$received"
-            else
-                printf "%-62s\n" "$address"
+                printf " %12s" "$received"
             fi
         elif [ "$print_info" = "balance" ]; then
             if balance="$(
@@ -127,10 +131,18 @@ else
                 cut -d " " -f 1 |
                 rev
             )"; then
-                printf "%-62s %12s\n" "$address" "$balance"
-            else
-                printf "%-62s\n" "$address"
+                printf " %12s" "$balance"
             fi
         fi
+
+        if [ "$print_comment" = true ]; then
+            if comment="$(
+                "$BTCS_HOME/scripts/btcs-comment" ad "$address" print 2>/dev/null
+            )"; then
+                printf " %s" "$comment"
+            fi
+        fi
+
+        printf "\n"
     done
 fi

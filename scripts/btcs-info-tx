@@ -53,6 +53,17 @@ def subprocess_run_command(program, print_error=True):
     return process.stdout
 
 
+def address_comment(address):
+    btcs_comment_command = [
+        str(btcs_home) + "/scripts/btcs-comment", "ad", address, "print"
+    ]
+    output = subprocess_run_command(btcs_comment_command, print_error=False)
+    if output is not False:
+        return output.decode().rstrip()
+    else:
+        return ""
+
+
 def transaction_from_txid(txid):
     """get raw transaction from txid"""
 
@@ -65,6 +76,7 @@ def transaction_from_txid(txid):
         return False
 
     return json.loads(output)
+
 
 def transaction_from_raw(raw_tx):
     """get raw transaction from rawtx"""
@@ -145,7 +157,11 @@ def tx_info(txid, raw_tx, print_fee):
     number = 0
     for inp in inputs:
         total_input += inp["value"]
-        print("%-62s %3s %s" % (inp["address"], number, format(inp["value"], ".8f")))
+        comment = address_comment(inp["address"])
+        print("%-62s %3s %s %s" % (
+            inp["address"], number,
+            format(inp["value"], ".8f"), comment
+        ))
         number += 1
 
     print("\n", end="")
@@ -153,7 +169,11 @@ def tx_info(txid, raw_tx, print_fee):
     number = 0
     for out in outputs:
         total_output += out["value"]
-        print("%-62s %3s %s" % (out["address"], number, format(out["value"], ".8f")))
+        comment = address_comment(out["address"])
+        print("%-62s %3s %s %s" % (
+            out["address"], number,
+            format(out["value"], ".8f"), comment
+        ))
         number += 1
 
     print("\n", end="")
@@ -231,6 +251,13 @@ if len(argv) < 1:
 
 txid_global = argv[0]
 argv = argv[1:]
+
+btcs_comment_command = [
+    str(btcs_home) + "/scripts/btcs-comment", "tx", txid_global, "print"
+]
+output = subprocess_run_command(btcs_comment_command, print_error=False)
+if output is not False:
+    print(output.decode(), end="\n")
 
 try:
     tx_info(txid_global, raw_tx_global, print_fee_global)

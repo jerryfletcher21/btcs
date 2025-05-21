@@ -1,0 +1,132 @@
+#!/bin/sh
+
+info=$(cat << EOF
+btcs comment [tx tx-id | ad address] [print | remove | edit | add comment]
+
+add edit print remove comments to txs and addresses
+EOF
+)
+
+comment_home="$BTCS_HOME/comment"
+
+comment_print_remove() {
+    comment_type="$1"
+    comment_dest="$2"
+    action="$3"
+    shift 3
+
+    comment_file="$comment_home/$comment_type/$comment_dest"
+    if [ ! -f "$comment_file" ]; then
+        echo "error: $comment_type $comment_dest does not have a comment" >&2
+        return 1
+    fi
+
+    case "$action" in
+        print)
+            cat "$comment_file" || return "$?"
+        ;;
+        remove)
+            rm "$comment_file" || return "$?"
+        ;;
+    esac
+
+    return 0
+}
+
+comment_edit() {
+    comment_type="$1"
+    comment_dest="$2"
+    shift 2
+
+    comment_type_dir="$comment_home/$comment_type"
+    if [ ! -d "$comment_type_dir" ]; then
+        mkdir -p "$comment_type_dir" || return "$?"
+    fi
+    comment_file="$comment_type_dir/$comment_dest"
+
+    "$EDITOR" "$comment_file"
+
+    return 0
+}
+
+comment_add() {
+    comment_type="$1"
+    comment_dest="$2"
+    comment="$3"
+    shift 3
+
+    comment_type_dir="$comment_home/$comment_type"
+    if [ ! -d "$comment_type_dir" ]; then
+        mkdir -p "$comment_type_dir" || return "$?"
+    fi
+    comment_file="$comment_type_dir/$comment_dest"
+
+    if [ -e "$comment_file" ]; then
+        echo "error: $comment_type $comment_dest comment already exists" >&2
+        return 1
+    fi
+
+    printf "%s\n" "$comment" > "$comment_file"
+
+    return 0
+}
+
+if [ "$#" -lt 1 ]; then
+    echo "error: insert comment type" >&2
+    exit 1
+fi
+case "$1" in
+    -h|--help)
+        echo "$info"
+        exit 0
+    ;;
+    -*)
+        echo "error: $1 not recognized" >&2
+        exit 1
+    ;;
+esac
+comment_type="$1"
+shift 1
+case "$comment_type" in
+    tx|ad) ;;
+    *)
+        echo "error: $comment_type should be tx|ad" >&2
+        exit 1
+    ;;
+esac
+
+if [ "$#" -lt 1 ]; then
+    echo "error: insert tx-id|address" >&2
+    exit 1
+fi
+comment_dest="$1"
+shift 1
+
+if [ "$#" -lt 1 ]; then
+    echo "error: insert action" >&2
+    exit 1
+fi
+action="$1"
+shift 1
+case "$action" in
+    print|remove)
+        comment_print_remove "$comment_type" "$comment_dest" "$action"
+    ;;
+    edit)
+        comment_edit "$comment_type" "$comment_dest"
+    ;;
+    add)
+        if [ "$#" -lt 1 ]; then
+            echo "error: insert comment" >&2
+            exit 1
+        fi
+        comment="$1"
+        shift 1
+
+        comment_add "$comment_type" "$comment_dest" "$comment"
+    ;;
+    *)
+        echo "error: action $action not recognized" >&2
+        exit 1
+    ;;
+esac

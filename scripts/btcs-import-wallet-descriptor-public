@@ -1,9 +1,11 @@
 #!/bin/sh
 
 info=$(cat << EOF
-btcs import-wallet-descriptor-public name date xpub [fingerprint_path] [[legacy-xpub] [legacy-fingerprint]]
+btcs import-wallet-descriptor-public [--no-create] name date xpub [fingerprint_path] [[legacy-xpub] [legacy-fingerprint]]
 EOF
 )
+
+create=true
 
 if [ "$#" -eq 0 ]; then
     echo "error: insert parameters" >&2
@@ -14,6 +16,9 @@ while [ "$#" -gt 0 ]; do
         -h|--help)
             echo "$info"
             exit 0
+        ;;
+        --no-create)
+            create=false
         ;;
         -*)
             echo "error: option $1 not recognized" >&2
@@ -181,15 +186,17 @@ import_json="${import_json} ]"
 
 echo "$import_json" | jq -r '.'
 
-$BTC_BIN -named createwallet \
-    wallet_name="$name" \
-    disable_private_keys=true \
-    blank=true \
-    avoid_reuse=false \
-    descriptors=true \
-    load_on_startup=true \
-    external_signer=false
+if [ "$create" = true ]; then
+    $BTC_BIN -named createwallet \
+        wallet_name="$name" \
+        disable_private_keys=true \
+        blank=true \
+        avoid_reuse=false \
+        descriptors=true \
+        load_on_startup=true \
+        external_signer=false
 
-echo "wallet $name created"
+    echo "wallet $name created"
+fi
 
 $BTC_BIN -rpcwallet="$name" importdescriptors "$import_json"

@@ -36,7 +36,7 @@ while true; do
     read -r amount || exit 1
     read -r confirmations || exit 1
 
-    printf "%-64s %4s %12s %-62s %7s\n" \
+    printf "%-64s %4s %12.8f %-62s %7s\n" \
         "$txid" "$vout" "$amount" "$address" "$confirmations"
 done |
 sort -n -r -k 5

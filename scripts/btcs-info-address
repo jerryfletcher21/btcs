@@ -27,6 +27,11 @@ if btc_bin_env is None:
     sys.exit(1)
 btc_bin = btc_bin_env.split()
 
+btcs_home = os.getenv("BTCS_HOME")
+if btcs_home is None:
+    print("error: BTCS_HOME not set", file=sys.stderr)
+    sys.exit(1)
+
 
 def subprocess_run_command(program, print_error=True):
     """run subprocess"""
@@ -92,15 +97,16 @@ def wallet_get_from_address(address):
     return False
 
 
-def transaction_from_txid(txid):
+def transaction_from_txid(txid, print_error):
     """get raw transaction from txid"""
 
     btc_getrawtransaction_command = btc_bin + [
         "-named", "getrawtransaction", "txid=" + txid, "verbosity=1"
     ]
-    output = subprocess_run_command(btc_getrawtransaction_command)
+    output = subprocess_run_command(btc_getrawtransaction_command, print_error=print_error)
     if output is False:
-        print("error: getting transaction %s" % txid, file=sys.stderr)
+        if print_error:
+            print("error: getting transaction %s" % txid, file=sys.stderr)
         return False
 
     return json.loads(output)
@@ -131,7 +137,7 @@ def transaction_get_inputs(transaction):
         txid = inp["txid"]
         vout = inp["vout"]
 
-        tx_input = transaction_from_txid(txid)
+        tx_input = transaction_from_txid(txid, True)
         if tx_input is False:
             return False
 
@@ -168,7 +174,7 @@ def list_transactions_address(wallet, address):
     total_amount_positive = 0
     total_amount_negative = 0
     for txid in txids:
-        transaction = transaction_from_txid(txid)
+        transaction = transaction_from_txid(txid, False)
         if transaction is False:
             continue
 
@@ -261,6 +267,13 @@ if len(argv) < 1:
 
 address_global = argv[0]
 argv = argv[1:]
+
+btcs_comment_command = [
+    str(btcs_home) + "/scripts/btcs-comment", "ad", address_global, "print"
+]
+output = subprocess_run_command(btcs_comment_command, print_error=False)
+if output is not False:
+    print(output.decode(), end="")
 
 if len(argv) >= 1:
     wallet_global = argv[0]
