@@ -36,7 +36,12 @@ while true; do
     read -r amount || exit 1
     read -r confirmations || exit 1
 
-    printf "%-64s %4s %12.8f %-62s %7s\n" \
-        "$txid" "$vout" "$amount" "$address" "$confirmations"
+    address_comment="$(
+        "$BTCS_HOME/scripts/btcs-comment" ad "$address" print 2>/dev/null |
+        cut -c -16
+    )"
+
+    printf "%-64s %4s %12.8f %-62s %7s %s\n" \
+        "$txid" "$vout" "$amount" "$address" "$confirmations" "$address_comment"
 done |
 sort -n -r -k 5
